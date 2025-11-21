@@ -6,7 +6,52 @@
         API_BASE_URL: 'https://api.ivac.com.vn',
         RETRY_COUNT: 3,
         RETRY_DELAY: 1000,
-        REQUEST_TIMEOUT: 30000
+        REQUEST_TIMEOUT: 30000,
+        typing: {
+            minDelay: 50,
+            maxDelay: 150
+        },
+        waiting: {
+            elementTimeout: 10000,
+            tokenTimeout: 15000
+        },
+        selectors: {
+            mobile: [
+                'input[name="mobile_no"]',
+                'input[name="mobile"]',
+                'input[name="phone"]',
+                'input[type="tel"]',
+                'input[placeholder*="mobile" i]',
+                'input[placeholder*="phone" i]'
+            ],
+            password: [
+                'input[name="password"]',
+                'input[type="password"]',
+                'input[placeholder*="password" i]'
+            ],
+            otp: [
+                'input[name="otp"]',
+                'input[name="code"]',
+                'input[placeholder*="otp" i]',
+                'input[placeholder*="code" i]'
+            ],
+            buttons: {
+                login: [
+                    'button[type="submit"]',
+                    'input[type="submit"]',
+                    '.login-button',
+                    '#login-button'
+                ],
+                otp: [
+                    'button[type="submit"]',
+                    '.otp-submit',
+                    '#otp-submit',
+                    '.send-otp',
+                    '#send-otp',
+                    '.btn-send'
+                ]
+            }
+        }
     };
 
     // Utility functions
@@ -39,16 +84,61 @@
         }
     };
 
+    // ==================== TELEMETRY & LOGGING ====================
+    const DOMTelemetry = {
+        events: [],
+        
+        log(eventType, message, data = {}) {
+            const event = {
+                timestamp: new Date().toISOString(),
+                type: eventType,
+                message: message,
+                data: data
+            };
+            
+            this.events.push(event);
+            
+            // Keep only last 50 events
+            if (this.events.length > 50) {
+                this.events.shift();
+            }
+            
+            // Silent logging (no console output for stealth)
+            // But make available for debugging
+            return event;
+        },
+        
+        success(message, data) {
+            return this.log('success', message, data);
+        },
+        
+        failure(message, error) {
+            return this.log('error', message, { 
+                error: error?.message || String(error),
+                stack: error?.stack 
+            });
+        },
+        
+        warning(message, data) {
+            return this.log('warning', message, data);
+        },
+        
+        getEvents() {
+            return [...this.events];
+        },
+        
+        clear() {
+            this.events = [];
+        }
+    };
+
     // ==================== DOM-BASED ANTI-DETECTION SYSTEM ====================
-    // This module provides human-like DOM manipulation to bypass Cloudflare
-    // Instead of direct fetch() calls, we simulate real user interactions
-    
     const DOMAutomation = {
         // Human-like typing simulation
         async typeIntoField(element, text, options = {}) {
             const { 
-                minDelay = 50, 
-                maxDelay = 150,
+                minDelay = Config.typing.minDelay, 
+                maxDelay = Config.typing.maxDelay,
                 triggerEvents = true 
             } = options;
             
@@ -123,18 +213,16 @@
         findElement(selectors) {
             for (let selector of selectors) {
                 try {
-                    // Try as CSS selector first
                     const element = document.querySelector(selector);
                     if (element) return element;
                 } catch (e) {
-                    // Invalid CSS selector, skip silently
                     continue;
                 }
             }
             return null;
         },
         
-        // Find element by text content (since :contains() is not valid CSS)
+        // Find element by text content
         findElementByText(text, tagName = '*') {
             const elements = document.querySelectorAll(tagName);
             for (let element of elements) {
@@ -146,7 +234,7 @@
         },
         
         // Wait for element to appear
-        async waitForElement(selector, timeout = 10000) {
+        async waitForElement(selector, timeout = Config.waiting.elementTimeout) {
             const startTime = Date.now();
             
             while (Date.now() - startTime < timeout) {
@@ -178,8 +266,6 @@
     };
     
     // ==================== IVAC FORM AUTOMATION ====================
-    // These functions find and interact with actual IVAC forms
-    
     const IVACFormAutomation = {
         // Login with phone + password (DOM-based)
         async loginWithPassword(mobileNo, password, onProgress) {
@@ -189,14 +275,7 @@
                 onProgress?.('Finding IVAC login form...');
                 
                 // Find mobile number field
-                const mobileField = DOMAutomation.findElement([
-                    'input[name="mobile_no"]',
-                    'input[name="mobile"]',
-                    'input[name="phone"]',
-                    'input[type="tel"]',
-                    'input[placeholder*="mobile" i]',
-                    'input[placeholder*="phone" i]'
-                ]);
+                const mobileField = DOMAutomation.findElement(Config.selectors.mobile);
                 
                 if (!mobileField) {
                     DOMTelemetry.failure('Mobile field not found', new Error('No matching selectors'));
@@ -209,11 +288,7 @@
                 await DOMAutomation.typeIntoField(mobileField, mobileNo);
                 
                 // Find password field
-                const passwordField = DOMAutomation.findElement([
-                    'input[name="password"]',
-                    'input[type="password"]',
-                    'input[placeholder*="password" i]'
-                ]);
+                const passwordField = DOMAutomation.findElement(Config.selectors.password);
                 
                 if (!passwordField) {
                     throw new Error('Password field not found on page');
@@ -223,12 +298,7 @@
                 await DOMAutomation.typeIntoField(passwordField, password);
                 
                 // Find login button
-                let loginBtn = DOMAutomation.findElement([
-                    'button[type="submit"]',
-                    'input[type="submit"]',
-                    '.login-button',
-                    '#login-button'
-                ]);
+                let loginBtn = DOMAutomation.findElement(Config.selectors.buttons.login);
                 
                 // If not found, try finding by text content
                 if (!loginBtn) {
@@ -258,7 +328,7 @@
         },
         
         // Wait for access token to appear (after site processes login)
-        async waitForToken(onProgress, timeout = 15000) {
+        async waitForToken(onProgress, timeout = Config.waiting.tokenTimeout) {
             const startTime = Date.now();
             
             while (Date.now() - startTime < timeout) {
@@ -279,12 +349,7 @@
                 onProgress?.('Finding OTP form...');
                 
                 // Find OTP field
-                const otpField = DOMAutomation.findElement([
-                    'input[name="otp"]',
-                    'input[name="code"]',
-                    'input[placeholder*="otp" i]',
-                    'input[placeholder*="code" i]'
-                ]);
+                const otpField = DOMAutomation.findElement(Config.selectors.otp);
                 
                 if (!otpField) {
                     throw new Error('OTP field not found on page');
@@ -352,12 +417,7 @@
                 await DOMAutomation.typeIntoField(mobileField, mobileNo);
                 
                 // Find send OTP button
-                let sendBtn = DOMAutomation.findElement([
-                    'button[type="submit"]',
-                    '.send-otp',
-                    '#send-otp',
-                    '.btn-send'
-                ]);
+                let sendBtn = DOMAutomation.findElement(Config.selectors.buttons.otp);
                 
                 // If not found, try finding by text content
                 if (!sendBtn) {
@@ -458,12 +518,14 @@
                 
                 if (result.access_token) {
                     this.setToken(result.access_token);
+                    DOMTelemetry.success('API login successful');
                     return { success: true, data: result };
                 }
                 
                 return { success: false, error: 'No access token received' };
                 
             } catch (error) {
+                DOMTelemetry.failure('API login failed', error);
                 return { success: false, error: error.message };
             }
         },
@@ -478,12 +540,14 @@
                 
                 if (result.access_token) {
                     this.setToken(result.access_token);
+                    DOMTelemetry.success('API OTP login successful');
                     return { success: true, data: result };
                 }
                 
                 return { success: false, error: 'No access token received' };
                 
             } catch (error) {
+                DOMTelemetry.failure('API OTP login failed', error);
                 return { success: false, error: error.message };
             }
         },
@@ -494,9 +558,11 @@
                     mobile_no: mobileNo
                 });
                 
+                DOMTelemetry.success('OTP sent via API');
                 return { success: true, data: result };
                 
             } catch (error) {
+                DOMTelemetry.failure('OTP sending failed', error);
                 return { success: false, error: error.message };
             }
         },
@@ -524,54 +590,6 @@
         }
     };
 
-    // ==================== TELEMETRY & LOGGING ====================
-    const DOMTelemetry = {
-        events: [],
-        
-        log(eventType, message, data = {}) {
-            const event = {
-                timestamp: new Date().toISOString(),
-                type: eventType,
-                message: message,
-                data: data
-            };
-            
-            this.events.push(event);
-            
-            // Keep only last 50 events
-            if (this.events.length > 50) {
-                this.events.shift();
-            }
-            
-            // Silent logging (no console output for stealth)
-            // But make available for debugging
-            return event;
-        },
-        
-        success(message, data) {
-            return this.log('success', message, data);
-        },
-        
-        failure(message, error) {
-            return this.log('error', message, { 
-                error: error?.message || String(error),
-                stack: error?.stack 
-            });
-        },
-        
-        warning(message, data) {
-            return this.log('warning', message, data);
-        },
-        
-        getEvents() {
-            return [...this.events];
-        },
-        
-        clear() {
-            this.events = [];
-        }
-    };
-
     // ==================== MAIN IVAC AUTOMATION CLASS ====================
     class IVACAutomation {
         constructor() {
@@ -590,6 +608,7 @@
                 loginMethod = this.detectPreferredMethod();
             }
             
+            this.currentMethod = loginMethod;
             onProgress?.(`Using ${loginMethod.toUpperCase()} login method...`);
             
             if (loginMethod === 'dom') {
@@ -613,7 +632,12 @@
         async sendOTP(mobileNo, options = {}) {
             const { method = 'auto', onProgress } = options;
             
-            if (method === 'dom' || (method === 'auto' && this.detectPreferredMethod() === 'dom')) {
+            let sendMethod = method;
+            if (method === 'auto') {
+                sendMethod = this.detectPreferredMethod();
+            }
+            
+            if (sendMethod === 'dom') {
                 return await IVACFormAutomation.sendOTP(mobileNo, onProgress);
             } else {
                 return await AuthManager.sendOTP(mobileNo);
@@ -649,6 +673,15 @@
             });
         }
         
+        // Get current authentication status
+        getAuthStatus() {
+            return {
+                isAuthenticated: AuthManager.isAuthenticated(),
+                currentMethod: this.currentMethod,
+                tokenExists: !!AuthManager.getToken()
+            };
+        }
+        
         // Get telemetry data
         getTelemetry() {
             return DOMTelemetry.getEvents();
@@ -663,20 +696,35 @@
         logout() {
             AuthManager.clearToken();
             this.isAuthenticated = false;
+            this.currentMethod = 'api';
             DOMTelemetry.success('User logged out');
+        }
+        
+        // Get DOM automation instance for direct access
+        getDOMAutomation() {
+            return DOMAutomation;
+        }
+        
+        // Get form automation instance for direct access
+        getFormAutomation() {
+            return IVACFormAutomation;
         }
     }
 
     // ==================== EXPORT & INITIALIZATION ====================
-    // Export for use in main script
+    // Export all modules for external access
     window.IVACAutomation = IVACAutomation;
     window.DOMAutomation = DOMAutomation;
     window.IVACFormAutomation = IVACFormAutomation;
     window.AuthManager = AuthManager;
     window.APIClient = APIClient;
     window.DOMTelemetry = DOMTelemetry;
+    window.IVACConfig = Config;
+    window.IVACUtils = Utils;
     
-    // Auto-initialize
+    // Auto-initialize main class
     window.ivacAutomation = new IVACAutomation();
+    
+    DOMTelemetry.success('IVAC Automation System initialized successfully');
     
 })();
